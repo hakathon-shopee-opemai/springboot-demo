@@ -20,4 +20,11 @@ public interface OrderDecisionCachePort {
     java.util.Optional<OrderId> resolveCancelIdempotencyKey(String key);
 
     void rememberCancelIdempotencyKey(String key, OrderId id);
+
+    java.util.Optional<java.util.UUID> resolveReturnIdempotencyKey(String key);
+
+    void rememberReturnIdempotencyKey(String key, java.util.UUID returnId);
+
+    /** Increment the customer's rolling return-velocity counter (soft pre-signal). */
+    void incrementReturnVelocity(parallax.vn.springbootdemo.domain.customer.vo.CustomerId customerId);
 }

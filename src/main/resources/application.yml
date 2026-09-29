@@ -51,6 +51,10 @@ clients:
     connect-timeout: 2s
     read-timeout: 5s
 
+# Return & Refund policy (docs/06). Return window measured from order createdAt.
+returns:
+  window-days: ${RETURN_WINDOW_DAYS:30}
+
 # Shared HMAC secret used to sign/verify service-to-service requests.
 security:
   service-shared-secret: ${SERVICE_SHARED_SECRET:change-me-in-prod}

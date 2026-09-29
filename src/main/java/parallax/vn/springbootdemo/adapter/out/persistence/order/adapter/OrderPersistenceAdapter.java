@@ -28,4 +28,9 @@ public class OrderPersistenceAdapter implements OrderRepositoryPort {
     public Optional<Order> findById(OrderId id) {
         return repository.findById(id.value()).map(mapper::toDomain);
     }
+
+    @Override
+    public long countByCustomerId(parallax.vn.springbootdemo.domain.customer.vo.CustomerId customerId) {
+        return repository.countByCustomerId(customerId.value());
+    }
 }
