@@ -1,0 +1,104 @@
+# Base config (all profiles). Profile-specific overrides live in application-<profile>.yml.
+spring:
+  application:
+    name: order-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:order_db}
+    username: ${DB_USER:parallax}
+    password: ${DB_PASSWORD:parallax}
+    hikari:
+      pool-name: order-hikari
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+  jpa:
+    hibernate:
+      ddl-auto: validate          # schema is owned by Flyway, never by Hibernate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc.time_zone: UTC
+        format_sql: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:parallax}
+      database: ${REDIS_DATABASE:0}
+      timeout: 2s
+
+  cache:
+    type: redis
+    redis:
+      time-to-live: 300000        # default TTL 5m for @Cacheable entries
+
+server:
+  port: 8080
+  shutdown: graceful
+
+# Outbound dependency: the FastAPI risk-service (the parallax hop).
+# Consumed by a @ConfigurationProperties bean under config/properties (to be implemented).
+clients:
+  risk-service:
+    base-url: ${RISK_SERVICE_BASE_URL:http://localhost:8000}
+    connect-timeout: 2s
+    read-timeout: 5s
+
+# Shared HMAC secret used to sign/verify service-to-service requests.
+security:
+  service-shared-secret: ${SERVICE_SHARED_SECRET:change-me-in-prod}
+  jwt:
+    secret: ${AUTH_JWT_SECRET:change-me-jwt-secret-min-32-bytes-long!!}
+    issuer: parallax-order-service
+    ttl-seconds: 3600
+  demo-user:
+    username: ${AUTH_DEMO_USERNAME:demo}
+    password: ${AUTH_DEMO_PASSWORD:demo1234}
+
+# Fixed-window rate limiter for public /api/v1/** routes (Redis-backed).
+ratelimit:
+  capacity: ${RATE_LIMIT_CAPACITY:100}
+  window-seconds: ${RATE_LIMIT_WINDOW_SECONDS:60}
+  enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,loggers
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+    loggers:
+      access: unrestricted          # allow runtime log-level changes via /actuator/loggers
+
+# ---------------------------------------------------------------------------
+# Logging. Appender wiring lives in logback-spring.xml (console/JSON/rolling
+# files/async). Levels below are convenience overrides via env; logback stays
+# the source of truth for appenders. LOG_DIR controls where files are written.
+# ---------------------------------------------------------------------------
+logging:
+  group:
+    application:
+      - parallax.vn.springbootdemo
+    persistence:
+      - org.hibernate.SQL
+      - org.springframework.orm.jpa
+      - com.zaxxer.hikari
+    web:
+      - org.springframework.web
+  level:
+    root: ${LOG_LEVEL_ROOT:INFO}
+    application: ${LOG_LEVEL_APP:DEBUG}
+    persistence: ${LOG_LEVEL_PERSISTENCE:INFO}
+    web: ${LOG_LEVEL_WEB:INFO}
+    org.springframework.security: ${LOG_LEVEL_SECURITY:INFO}

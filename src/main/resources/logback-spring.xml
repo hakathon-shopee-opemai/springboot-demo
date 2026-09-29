@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Detailed logging configuration for order-service.
+
+  MDC correlation keys (populated by common/logging): traceId, spanId, userId.
+
+  Profiles:
+    docker          -> JSON (logstash) to stdout only (platform collects it). No file
+                       appenders are even DEFINED here, because logback starts every
+                       declared appender and a non-root container user cannot create
+                       ./logs — so file appenders live under the !docker profile only.
+    default / local -> human console + rolling app/error files (async), files under ./logs
+-->
+<configuration scan="true" scanPeriod="30 seconds">
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+
+    <springProperty scope="context" name="appName" source="spring.application.name" defaultValue="order-service"/>
+    <property name="LOG_DIR" value="${LOG_DIR:-logs}"/>
+    <property name="CONSOLE_PATTERN"
+              value="%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %highlight(%-5level) [%thread] [${appName}] [traceId=%X{traceId:-} spanId=%X{spanId:-} userId=%X{userId:-}] %cyan(%logger{36}) - %msg%n%ex"/>
+    <property name="FILE_PATTERN"
+              value="%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%thread] [${appName}] [traceId=%X{traceId:-} spanId=%X{spanId:-} userId=%X{userId:-}] %logger{36} - %msg%n%ex"/>
+
+    <!-- Console appenders never touch the filesystem: safe to declare in all profiles. -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${CONSOLE_PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+    <appender name="JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <includeMdcKeyName>traceId</includeMdcKeyName>
+            <includeMdcKeyName>spanId</includeMdcKeyName>
+            <includeMdcKeyName>userId</includeMdcKeyName>
+            <customFields>{"service":"${appName}"}</customFields>
+            <fieldNames>
+                <timestamp>@timestamp</timestamp>
+                <version>[ignore]</version>
+                <levelValue>[ignore]</levelValue>
+            </fieldNames>
+        </encoder>
+    </appender>
+
+    <!-- Fine-grained logger levels (no appender refs, safe everywhere). -->
+    <logger name="parallax.vn.springbootdemo" level="DEBUG"/>
+    <logger name="org.springframework.web" level="INFO"/>
+    <logger name="org.hibernate.SQL" level="INFO"/>
+    <logger name="org.hibernate.orm.jdbc.bind" level="WARN"/>
+    <logger name="org.springframework.security" level="INFO"/>
+
+    <!-- Containers: JSON to stdout only. -->
+    <springProfile name="docker">
+        <root level="INFO">
+            <appender-ref ref="JSON_CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <!-- Local/dev: console + rolling files. File appenders are declared ONLY here. -->
+    <springProfile name="!docker">
+        <appender name="ROLLING_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>${LOG_DIR}/${appName}.log</file>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${LOG_DIR}/${appName}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+                <maxFileSize>50MB</maxFileSize>
+                <maxHistory>14</maxHistory>
+                <totalSizeCap>2GB</totalSizeCap>
+            </rollingPolicy>
+            <encoder><pattern>${FILE_PATTERN}</pattern></encoder>
+        </appender>
+
+        <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+            <file>${LOG_DIR}/${appName}-error.log</file>
+            <filter class="ch.qos.logback.classic.filter.ThresholdFilter"><level>ERROR</level></filter>
+            <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+                <fileNamePattern>${LOG_DIR}/${appName}-error.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+                <maxFileSize>50MB</maxFileSize>
+                <maxHistory>30</maxHistory>
+                <totalSizeCap>1GB</totalSizeCap>
+            </rollingPolicy>
+            <encoder><pattern>${FILE_PATTERN}</pattern></encoder>
+        </appender>
+
+        <appender name="ASYNC_ROLLING_FILE" class="ch.qos.logback.classic.AsyncAppender">
+            <queueSize>1024</queueSize><discardingThreshold>0</discardingThreshold><neverBlock>true</neverBlock>
+            <appender-ref ref="ROLLING_FILE"/>
+        </appender>
+        <appender name="ASYNC_ERROR_FILE" class="ch.qos.logback.classic.AsyncAppender">
+            <queueSize>256</queueSize><discardingThreshold>0</discardingThreshold><neverBlock>true</neverBlock>
+            <appender-ref ref="ERROR_FILE"/>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="ASYNC_ROLLING_FILE"/>
+            <appender-ref ref="ASYNC_ERROR_FILE"/>
+        </root>
+    </springProfile>
+</configuration>

@@ -1,0 +1,131 @@
+package parallax.vn.springbootdemo.application.order.usecase;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.transaction.annotation.Transactional;
+import parallax.vn.springbootdemo.application.order.dto.OrderRiskSnapshot;
+import parallax.vn.springbootdemo.application.order.dto.PlaceOrderCommand;
+import parallax.vn.springbootdemo.application.order.port.in.PlaceOrderUseCase;
+import parallax.vn.springbootdemo.application.order.port.out.InventoryPort;
+import parallax.vn.springbootdemo.application.order.port.out.OrderDecisionCachePort;
+import parallax.vn.springbootdemo.application.order.port.out.OrderNumberPort;
+import parallax.vn.springbootdemo.application.order.port.out.OrderRepositoryPort;
+import parallax.vn.springbootdemo.application.order.port.out.RiskAssessmentPort;
+import parallax.vn.springbootdemo.application.shared.port.out.DomainEventPublisher;
+import parallax.vn.springbootdemo.common.annotation.UseCase;
+import parallax.vn.springbootdemo.common.exception.code.ErrorCode;
+import parallax.vn.springbootdemo.common.exception.model.ApplicationException;
+import parallax.vn.springbootdemo.domain.customer.aggregate.Customer;
+import parallax.vn.springbootdemo.domain.customer.exception.CustomerNotFoundException;
+import parallax.vn.springbootdemo.domain.customer.vo.CustomerId;
+import parallax.vn.springbootdemo.application.customer.port.out.CustomerRepositoryPort;
+import parallax.vn.springbootdemo.domain.order.aggregate.Order;
+import parallax.vn.springbootdemo.domain.order.entity.OrderLine;
+import parallax.vn.springbootdemo.domain.order.event.OrderPlaced;
+import parallax.vn.springbootdemo.domain.order.vo.OrderId;
+import parallax.vn.springbootdemo.domain.order.vo.PaymentMethod;
+import parallax.vn.springbootdemo.domain.order.vo.RiskDecisionSnapshot;
+import parallax.vn.springbootdemo.domain.shared.vo.Address;
+import parallax.vn.springbootdemo.domain.shared.vo.Money;
+
+/** Orchestrates order placement including the parallax hop to the risk-service. */
+@UseCase
+public class PlaceOrderService implements PlaceOrderUseCase {
+
+    private static final Logger log = LoggerFactory.getLogger(PlaceOrderService.class);
+
+    private final OrderRepositoryPort orders;
+    private final CustomerRepositoryPort customers;
+    private final OrderNumberPort orderNumbers;
+    private final RiskAssessmentPort risk;
+    private final OrderDecisionCachePort cache;
+    private final InventoryPort inventory;
+    private final DomainEventPublisher events;
+
+    public PlaceOrderService(OrderRepositoryPort orders, CustomerRepositoryPort customers,
+            OrderNumberPort orderNumbers, RiskAssessmentPort risk, OrderDecisionCachePort cache,
+            InventoryPort inventory, DomainEventPublisher events) {
+        this.orders = orders;
+        this.customers = customers;
+        this.orderNumbers = orderNumbers;
+        this.risk = risk;
+        this.cache = cache;
+        this.inventory = inventory;
+        this.events = events;
+    }
+
+    @Override
+    @Transactional
+    public Order placeOrder(PlaceOrderCommand command) {
+        // 1. idempotency short-circuit
+        if (command.idempotencyKey() != null && !command.idempotencyKey().isBlank()) {
+            var existing = cache.resolveIdempotencyKey(command.idempotencyKey());
+            if (existing.isPresent()) {
+                return orders.findById(existing.get())
+                        .orElseThrow(() -> new ApplicationException(ErrorCode.INTERNAL,
+                                "idempotent order missing"));
+            }
+        }
+
+        // 2. load customer
+        CustomerId customerId = CustomerId.of(command.customerId());
+        Customer customer = customers.findById(customerId)
+                .orElseThrow(() -> new CustomerNotFoundException(command.customerId().toString()));
+
+        // 3. build PENDING order + totals
+        List<OrderLine> lines = new ArrayList<>();
+        for (PlaceOrderCommand.LineItem item : command.lines()) {
+            lines.add(OrderLine.create(item.productId(), item.productName(),
+                    Money.of(item.unitPrice(), command.currency()), item.quantity()));
+        }
+        Address address = command.shippingAddress() == null ? null
+                : new Address(command.shippingAddress().line1(), command.shippingAddress().city(),
+                        command.shippingAddress().country(), command.shippingAddress().postalCode());
+        Order order = Order.place(orderNumbers.next(), customerId, command.currency(), lines, address,
+                PaymentMethod.valueOf(command.paymentMethod()));
+
+        // 4. persist PENDING, reserve inventory
+        order = orders.save(order);
+        inventory.reserve(order.id(), order.lines());
+
+        // 5. parallax hop: risk assessment (fail-safe on error inside the adapter)
+        OrderRiskSnapshot snapshot = toSnapshot(order, address);
+        RiskDecisionSnapshot decision = risk.assess(snapshot);
+
+        // 6. apply verdict; stats only for non-rejected orders (AFTER assessment)
+        order.applyRisk(decision);
+        if (order.isRejected()) {
+            inventory.release(order.id());
+        } else {
+            customer.registerPlacedOrder(order.total(), Instant.now());
+            customers.save(customer);
+        }
+        order = orders.save(order);
+
+        // 7. cache decision + remember idempotency key
+        cache.putDecision(order.id(), decision);
+        if (command.idempotencyKey() != null && !command.idempotencyKey().isBlank()) {
+            cache.rememberIdempotencyKey(command.idempotencyKey(), order.id());
+        }
+
+        // 8. publish event
+        events.publish(new OrderPlaced(order.id().value(), customerId.value(), order.status(),
+                Instant.now()));
+        log.info("order placed number={} status={} score={}", order.orderNumber(), order.status(),
+                decision.score());
+        return order;
+    }
+
+    private OrderRiskSnapshot toSnapshot(Order order, Address address) {
+        List<OrderRiskSnapshot.LineSnapshot> lines = order.lines().stream()
+                .map(l -> new OrderRiskSnapshot.LineSnapshot(l.productId(), l.quantity(),
+                        l.unitPrice().amount()))
+                .toList();
+        String shippingCountry = address == null ? null : address.country();
+        return new OrderRiskSnapshot(order.id().value(), order.customerId().value(),
+                order.total().amount(), order.currency(), shippingCountry, lines);
+    }
+}

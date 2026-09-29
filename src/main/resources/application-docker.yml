@@ -1,0 +1,15 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: none
+# Overrides applied when SPRING_PROFILES_ACTIVE=docker (see docker-compose.yml).
+# Connection values arrive via environment variables injected by compose, so the
+# base application.yml placeholders already resolve. The docker profile switches
+# logback to the JSON console appender (see logback-spring.xml) and quiets app logs.
+logging:
+  level:
+    application: INFO
+management:
+  endpoint:
+    health:
+      show-details: always
