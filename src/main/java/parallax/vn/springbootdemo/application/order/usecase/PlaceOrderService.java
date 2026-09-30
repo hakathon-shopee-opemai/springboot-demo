@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import parallax.vn.springbootdemo.application.order.dto.OrderRiskSnapshot;
 import parallax.vn.springbootdemo.application.order.dto.PlaceOrderCommand;
@@ -107,11 +108,8 @@ public class PlaceOrderService implements PlaceOrderUseCase {
         }
         order = orders.save(order);
 
-        // 7. cache decision + remember idempotency key
-        cache.putDecision(order.id(), decision);
-        if (command.idempotencyKey() != null && !command.idempotencyKey().isBlank()) {
-            cache.rememberIdempotencyKey(command.idempotencyKey(), order.id());
-        }
+        // 7. cache decision + remember idempotency key (same-service call)
+        rememberDecision(order, decision, command.idempotencyKey());
 
         // 8. publish event
         events.publish(new OrderPlaced(order.id().value(), customerId.value(), order.status(),
@@ -119,6 +117,19 @@ public class PlaceOrderService implements PlaceOrderUseCase {
         log.info("order placed number={} status={} score={}", order.orderNumber(), order.status(),
                 decision.score());
         return order;
+    }
+
+    /**
+     * Remembers the risk verdict and the idempotency key in its own transaction.
+     * Called from {@link #placeOrder} on {@code this}: the self-invocation bypasses the
+     * Spring proxy, so REQUIRES_NEW is silently ignored and the writes join the outer tx.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void rememberDecision(Order order, RiskDecisionSnapshot decision, String idempotencyKey) {
+        cache.putDecision(order.id(), decision);
+        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+            cache.rememberIdempotencyKey(idempotencyKey, order.id());
+        }
     }
 
     private OrderRiskSnapshot toSnapshot(Order order, Address address) {
