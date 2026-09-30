@@ -16,6 +16,7 @@ import parallax.vn.springbootdemo.application.order.port.out.OrderDecisionCacheP
 import parallax.vn.springbootdemo.application.order.port.out.OrderRepositoryPort;
 import parallax.vn.springbootdemo.application.order.port.out.ReturnRepositoryPort;
 import parallax.vn.springbootdemo.application.order.port.out.ReturnRiskAssessmentPort;
+import parallax.vn.springbootdemo.common.annotation.RateLimited;
 import parallax.vn.springbootdemo.common.annotation.UseCase;
 import parallax.vn.springbootdemo.common.exception.code.ErrorCode;
 import parallax.vn.springbootdemo.common.exception.model.ApplicationException;
@@ -59,6 +60,7 @@ public class RequestReturnService implements RequestReturnUseCase {
 
     @Override
     @Transactional
+    @RateLimited(key = "returns.request", permits = 10, windowSeconds = 60)
     public ReturnResult requestReturn(RequestReturnCommand command) {
         // 1. idempotency short-circuit (fast path via Redis)
         if (hasText(command.idempotencyKey())) {

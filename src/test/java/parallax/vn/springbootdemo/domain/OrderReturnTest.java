@@ -130,6 +130,22 @@ class OrderReturnTest {
     }
 
     @Test
+    void resolve_review_refunds_and_mints_ledger() {
+        OrderReturn r = request(approvedOrder(), "100.00");
+        r.applyDecision(ReturnDecision.REVIEW, 45);
+        r.resolveReview(ReturnDecision.AUTO_REFUND, 20);
+        assertThat(r.status()).isEqualTo(ReturnStatus.REFUNDED);
+        assertThat(r.refund()).isNotNull();
+    }
+
+    @Test
+    void resolve_review_requires_under_review() {
+        OrderReturn r = request(approvedOrder(), "100.00");
+        assertThatThrownBy(() -> r.resolveReview(ReturnDecision.DENY, 90))
+                .isInstanceOf(ReturnNotAllowedException.class);
+    }
+
+    @Test
     void status_active_flag_matches_index_predicate() {
         assertThat(ReturnStatus.REFUNDED.isActive()).isTrue();
         assertThat(ReturnStatus.UNDER_REVIEW.isActive()).isTrue();

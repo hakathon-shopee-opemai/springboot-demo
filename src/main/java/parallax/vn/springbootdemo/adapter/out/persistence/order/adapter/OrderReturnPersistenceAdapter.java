@@ -60,6 +60,14 @@ public class OrderReturnPersistenceAdapter implements ReturnRepositoryPort {
     }
 
     @Override
+    public List<OrderReturn> findUnderReviewBefore(Instant cutoff) {
+        return returnRepository.findTop50ByStatusAndCreatedAtBeforeOrderByCreatedAtAsc(
+                        ReturnStatus.UNDER_REVIEW.name(), cutoff).stream()
+                .map(e -> mapper.toDomain(e, null))
+                .toList();
+    }
+
+    @Override
     public ReturnHistoryStats statsByCustomer(CustomerId customerId, Instant since) {
         UUID cid = customerId.value();
         long totalReturns = returnRepository.countByCustomerId(cid);

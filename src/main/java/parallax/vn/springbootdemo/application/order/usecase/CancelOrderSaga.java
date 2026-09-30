@@ -26,6 +26,7 @@ import parallax.vn.springbootdemo.common.exception.model.ApplicationException;
 import parallax.vn.springbootdemo.domain.customer.aggregate.Customer;
 import parallax.vn.springbootdemo.domain.order.aggregate.Order;
 import parallax.vn.springbootdemo.domain.order.aggregate.OrderCancellation;
+import parallax.vn.springbootdemo.domain.order.entity.OrderLine;
 import parallax.vn.springbootdemo.domain.order.vo.OrderId;
 import parallax.vn.springbootdemo.domain.order.vo.OrderStatus;
 import parallax.vn.springbootdemo.domain.order.vo.SagaStep;
@@ -100,7 +101,7 @@ public class CancelOrderSaga implements CancelOrderUseCase {
             try {
                 // S1 release inventory  (comp: re-reserve)
                 inventory.release(orderId);
-                compensations.push(() -> inventory.reserve(orderId, order.lines()));
+                compensations.push(() -> reReserve(orderId, order));
                 saga.recordStep(SagaStep.done("releaseInventory"));
                 saga = cancellations.save(saga);
 
@@ -166,6 +167,12 @@ public class CancelOrderSaga implements CancelOrderUseCase {
             }
         }
         return Optional.empty();
+    }
+
+    private void reReserve(OrderId orderId, Order order) {
+        for (OrderLine line : order.lines()) {
+            inventory.reserveLine(orderId, line);
+        }
     }
 
     private void compensate(Deque<Runnable> compensations) {

@@ -54,6 +54,8 @@ clients:
 # Return & Refund policy (docs/06). Return window measured from order createdAt.
 returns:
   window-days: ${RETURN_WINDOW_DAYS:30}
+  review-sla-hours: ${RETURN_REVIEW_SLA_HOURS:24}
+  review-sweep-ms: ${RETURN_REVIEW_SWEEP_MS:300000}
 
 # Shared HMAC secret used to sign/verify service-to-service requests.
 security:

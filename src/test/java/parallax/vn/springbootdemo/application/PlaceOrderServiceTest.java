@@ -92,6 +92,7 @@ class PlaceOrderServiceTest {
         assertThat(customer.lifetimeOrderCount()).isEqualTo(1);
         verify(customers).save(customer);
         verify(orders, times(2)).save(any(Order.class));
+        verify(inventory, times(1)).reserveLine(any(), any());
     }
 
     @Test
@@ -103,7 +104,7 @@ class PlaceOrderServiceTest {
     }
 
     @Test
-    void reject_releases_inventory_and_skips_stats() {
+    void reject_never_reserves_inventory_and_skips_stats() {
         Customer customer = activeCustomer();
         when(customers.findById(any())).thenReturn(Optional.of(customer));
         when(risk.assess(any())).thenReturn(verdict(RiskDecision.REJECT, RiskLevel.HIGH, 90));
@@ -113,7 +114,7 @@ class PlaceOrderServiceTest {
         assertThat(result.status()).isEqualTo(OrderStatus.REJECTED);
         assertThat(customer.lifetimeOrderCount()).isZero();
         verify(customers, never()).save(any());
-        verify(inventory).release(any());
+        verify(inventory, never()).reserveLine(any(), any());
     }
 
     @Test

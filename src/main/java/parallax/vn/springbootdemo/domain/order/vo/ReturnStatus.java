@@ -10,7 +10,8 @@ public enum ReturnStatus {
     public boolean canTransitionTo(ReturnStatus target) {
         return switch (this) {
             case REQUESTED -> target == REFUNDED || target == UNDER_REVIEW || target == DENIED;
-            case REFUNDED, UNDER_REVIEW, DENIED -> false;
+            case UNDER_REVIEW -> target == REFUNDED || target == DENIED;
+            case REFUNDED, DENIED -> false;
         };
     }
 

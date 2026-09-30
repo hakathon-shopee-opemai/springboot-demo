@@ -145,7 +145,7 @@ class CancelOrderSagaTest {
                 .isInstanceOf(ApplicationException.class);
 
         verify(inventory).release(any());
-        verify(inventory).reserve(any(), any());     // S1 compensation ran
+        verify(inventory).reserveLine(any(), any()); // S1 compensation ran
         verify(finalizer, never()).finalizeSuccess(any(), any(), any());
         assertThat(order.status()).isEqualTo(OrderStatus.APPROVED); // not cancelled
         verify(lock).unlock(any(), eq("token"));

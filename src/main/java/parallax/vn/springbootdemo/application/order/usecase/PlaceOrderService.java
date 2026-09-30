@@ -15,6 +15,7 @@ import parallax.vn.springbootdemo.application.order.port.out.OrderNumberPort;
 import parallax.vn.springbootdemo.application.order.port.out.OrderRepositoryPort;
 import parallax.vn.springbootdemo.application.order.port.out.RiskAssessmentPort;
 import parallax.vn.springbootdemo.application.shared.port.out.DomainEventPublisher;
+import parallax.vn.springbootdemo.common.annotation.RateLimited;
 import parallax.vn.springbootdemo.common.annotation.UseCase;
 import parallax.vn.springbootdemo.common.exception.code.ErrorCode;
 import parallax.vn.springbootdemo.common.exception.model.ApplicationException;
@@ -59,6 +60,7 @@ public class PlaceOrderService implements PlaceOrderUseCase {
 
     @Override
     @Transactional
+    @RateLimited(key = "orders.place", permits = 30, windowSeconds = 60)
     public Order placeOrder(PlaceOrderCommand command) {
         // 1. idempotency short-circuit
         if (command.idempotencyKey() != null && !command.idempotencyKey().isBlank()) {
@@ -87,19 +89,19 @@ public class PlaceOrderService implements PlaceOrderUseCase {
         Order order = Order.place(orderNumbers.next(), customerId, command.currency(), lines, address,
                 PaymentMethod.valueOf(command.paymentMethod()));
 
-        // 4. persist PENDING, reserve inventory
+        // 4. persist PENDING (stock is only held once risk has spoken)
         order = orders.save(order);
-        inventory.reserve(order.id(), order.lines());
 
         // 5. parallax hop: risk assessment (fail-safe on error inside the adapter)
         OrderRiskSnapshot snapshot = toSnapshot(order, address);
         RiskDecisionSnapshot decision = risk.assess(snapshot);
 
-        // 6. apply verdict; stats only for non-rejected orders (AFTER assessment)
+        // 6. apply verdict; reserve stock line by line + stats only for non-rejected orders
         order.applyRisk(decision);
-        if (order.isRejected()) {
-            inventory.release(order.id());
-        } else {
+        if (!order.isRejected()) {
+            for (OrderLine line : order.lines()) {
+                inventory.reserveLine(order.id(), line);
+            }
             customer.registerPlacedOrder(order.total(), Instant.now());
             customers.save(customer);
         }

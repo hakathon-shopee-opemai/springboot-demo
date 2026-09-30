@@ -1,6 +1,7 @@
 package parallax.vn.springbootdemo.application.order.port.out;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import parallax.vn.springbootdemo.application.order.dto.ReturnHistoryStats;
@@ -15,6 +16,9 @@ public interface ReturnRepositoryPort {
 
     /** True when an active (REFUNDED|UNDER_REVIEW) return already exists for the order. */
     boolean existsActiveReturn(OrderId orderId);
+
+    /** Oldest UNDER_REVIEW returns created before {@code cutoff} (bounded batch). */
+    List<OrderReturn> findUnderReviewBefore(Instant cutoff);
 
     /** Aggregated return figures for the customer; {@code since} bounds the rolling window. */
     ReturnHistoryStats statsByCustomer(CustomerId customerId, Instant since);

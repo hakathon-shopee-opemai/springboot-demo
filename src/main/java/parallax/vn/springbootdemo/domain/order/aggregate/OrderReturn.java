@@ -86,6 +86,21 @@ public class OrderReturn {
 
     /** Apply the risk verdict; a REFUNDED outcome mints the (single) refund ledger entry. */
     public void applyDecision(ReturnDecision decision, int riskScore) {
+        if (status != ReturnStatus.REQUESTED) {
+            throw new ReturnNotAllowedException("return already decided: " + status);
+        }
+        decide(decision, riskScore);
+    }
+
+    /** Close a manual review with a fresh verdict (REFUND or DENY; REVIEW keeps it open). */
+    public void resolveReview(ReturnDecision decision, int riskScore) {
+        if (status != ReturnStatus.UNDER_REVIEW) {
+            throw new ReturnNotAllowedException("return is not under review: " + status);
+        }
+        decide(decision, riskScore);
+    }
+
+    private void decide(ReturnDecision decision, int riskScore) {
         transitionTo(decision.toReturnStatus());
         this.decision = decision;
         this.riskScore = riskScore;
