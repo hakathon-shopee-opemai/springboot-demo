@@ -8,7 +8,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.RedisSerializationContext;
+import parallax.vn.springbootdemo.application.customer.dto.CustomerHistory;
 
 /** Tunes the auto-configured RedisCacheManager: JSON values + per-cache TTLs. */
 @Configuration
@@ -24,7 +26,11 @@ public class CacheConfig {
                         .fromSerializer(new GenericJackson2JsonRedisSerializer(objectMapper)));
         return builder -> builder
                 .cacheDefaults(defaults)
-                .withCacheConfiguration("customerHistory", defaults.entryTtl(Duration.ofMinutes(5)))
+                .withCacheConfiguration("customerHistory", defaults.entryTtl(Duration.ofMinutes(5))
+                        // Typed serializer: the generic one has no type info for this mapper and
+                        // reads entries back as LinkedHashMap, which fails the CustomerHistory cast.
+                        .serializeValuesWith(RedisSerializationContext.SerializationPair
+                                .fromSerializer(new Jackson2JsonRedisSerializer<>(objectMapper, CustomerHistory.class))))
                 .withCacheConfiguration("orderDecision", defaults.entryTtl(Duration.ofHours(24)));
     }
 }
