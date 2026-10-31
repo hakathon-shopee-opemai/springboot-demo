@@ -142,4 +142,39 @@ class PlaceOrderServiceTest {
         assertThat(service.placeOrder(cmd)).isSameAs(existing);
         verify(risk, never()).assess(any());
     }
+
+    @Test
+    void credit_card_is_accepted_and_mapped_to_card() {
+        when(customers.findById(any())).thenReturn(Optional.of(activeCustomer()));
+        when(risk.assess(any())).thenReturn(verdict(RiskDecision.APPROVE, RiskLevel.LOW, 10));
+        PlaceOrderCommand cmd = new PlaceOrderCommand(UUID.randomUUID(), "USD", "CREDIT_CARD",
+                null,
+                List.of(new PlaceOrderCommand.LineItem("p-1", "Widget", new BigDecimal("10.00"), 1)),
+                null);
+
+        Order result = service.placeOrder(cmd);
+
+        assertThat(result.paymentMethod())
+                .isEqualTo(parallax.vn.springbootdemo.domain.order.vo.PaymentMethod.CARD);
+        assertThat(result.status()).isEqualTo(OrderStatus.APPROVED);
+    }
+
+    @Test
+    void unsupported_payment_method_is_rejected_as_validation_error_without_side_effects() {
+        when(customers.findById(any())).thenReturn(Optional.of(activeCustomer()));
+        PlaceOrderCommand cmd = new PlaceOrderCommand(UUID.randomUUID(), "USD", "BITCOIN",
+                null,
+                List.of(new PlaceOrderCommand.LineItem("p-1", "Widget", new BigDecimal("10.00"), 1)),
+                null);
+
+        assertThatThrownBy(() -> service.placeOrder(cmd))
+                .isInstanceOf(parallax.vn.springbootdemo.common.exception.model.ApplicationException.class)
+                .hasMessageContaining("BITCOIN")
+                .extracting(ex -> ((parallax.vn.springbootdemo.common.exception.model.ApplicationException) ex)
+                        .getCode())
+                .isEqualTo(parallax.vn.springbootdemo.common.exception.code.ErrorCode.VALIDATION_ERROR);
+        verify(orders, never()).save(any());
+        verify(inventory, never()).reserveLine(any(), any());
+        verify(risk, never()).assess(any());
+    }
 }

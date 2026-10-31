@@ -88,7 +88,7 @@ public class PlaceOrderService implements PlaceOrderUseCase {
                 : new Address(command.shippingAddress().line1(), command.shippingAddress().city(),
                         command.shippingAddress().country(), command.shippingAddress().postalCode());
         Order order = Order.place(orderNumbers.next(), customerId, command.currency(), lines, address,
-                PaymentMethod.valueOf(command.paymentMethod()));
+                parsePaymentMethod(command.paymentMethod()));
 
         // 4. persist PENDING (stock is only held once risk has spoken)
         order = orders.save(order);
@@ -129,6 +129,17 @@ public class PlaceOrderService implements PlaceOrderUseCase {
         cache.putDecision(order.id(), decision);
         if (idempotencyKey != null && !idempotencyKey.isBlank()) {
             cache.rememberIdempotencyKey(idempotencyKey, order.id());
+        }
+    }
+
+    /** Unknown values are client input errors (400), not server failures (500). */
+    private static PaymentMethod parsePaymentMethod(String raw) {
+        try {
+            return PaymentMethod.parse(raw);
+        } catch (IllegalArgumentException ex) {
+            throw new ApplicationException(ErrorCode.VALIDATION_ERROR,
+                    "Unsupported paymentMethod '" + raw + "'. Allowed values: "
+                            + java.util.Arrays.toString(PaymentMethod.values()));
         }
     }
 
