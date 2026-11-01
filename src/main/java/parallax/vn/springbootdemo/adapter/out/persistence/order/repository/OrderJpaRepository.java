@@ -5,4 +5,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import parallax.vn.springbootdemo.adapter.out.persistence.order.entity.OrderEntity;
 
 public interface OrderJpaRepository extends JpaRepository<OrderEntity, UUID> {
+    long countByCustomerId(UUID customerId);
 }

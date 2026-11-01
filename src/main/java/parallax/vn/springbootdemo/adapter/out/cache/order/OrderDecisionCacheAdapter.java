@@ -20,6 +20,7 @@ public class OrderDecisionCacheAdapter implements OrderDecisionCachePort {
 
     private static final Logger log = LoggerFactory.getLogger(OrderDecisionCacheAdapter.class);
     private static final Duration TTL = Duration.ofHours(24);
+    private static final Duration RETURN_VELOCITY_TTL = Duration.ofDays(30);
     private static final String CUSTOMER_HISTORY_CACHE = "customerHistory";
 
     private final StringRedisTemplate redis;
@@ -91,6 +92,30 @@ public class OrderDecisionCacheAdapter implements OrderDecisionCachePort {
         redis.opsForValue().set(cancelIdemKey(key), id.value().toString(), TTL);
     }
 
+    @Override
+    public Optional<java.util.UUID> resolveReturnIdempotencyKey(String key) {
+        String id = redis.opsForValue().get(returnIdemKey(key));
+        return id == null ? Optional.empty() : Optional.of(java.util.UUID.fromString(id));
+    }
+
+    @Override
+    public void rememberReturnIdempotencyKey(String key, java.util.UUID returnId) {
+        redis.opsForValue().set(returnIdemKey(key), returnId.toString(), TTL);
+    }
+
+    @Override
+    public void incrementReturnVelocity(CustomerId customerId) {
+        try {
+            String key = returnVelocityKey(customerId);
+            Long count = redis.opsForValue().increment(key);
+            if (count != null && count == 1L) {
+                redis.expire(key, RETURN_VELOCITY_TTL);
+            }
+        } catch (Exception e) {
+            log.warn("failed to bump return velocity for {}", customerId.value(), e);
+        }
+    }
+
     private String decisionKey(OrderId id) {
         return "order:decision:" + id.value();
     }
@@ -101,5 +126,13 @@ public class OrderDecisionCacheAdapter implements OrderDecisionCachePort {
 
     private String cancelIdemKey(String key) {
         return "order:cancel:idem:" + key;
+    }
+
+    private String returnIdemKey(String key) {
+        return "order:return:idem:" + key;
+    }
+
+    private String returnVelocityKey(CustomerId customerId) {
+        return "return:velocity:" + customerId.value();
     }
 }

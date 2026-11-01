@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import parallax.vn.springbootdemo.application.order.dto.OrderRiskSnapshot;
 import parallax.vn.springbootdemo.application.order.dto.PlaceOrderCommand;
@@ -15,6 +16,7 @@ import parallax.vn.springbootdemo.application.order.port.out.OrderNumberPort;
 import parallax.vn.springbootdemo.application.order.port.out.OrderRepositoryPort;
 import parallax.vn.springbootdemo.application.order.port.out.RiskAssessmentPort;
 import parallax.vn.springbootdemo.application.shared.port.out.DomainEventPublisher;
+import parallax.vn.springbootdemo.common.annotation.RateLimited;
 import parallax.vn.springbootdemo.common.annotation.UseCase;
 import parallax.vn.springbootdemo.common.exception.code.ErrorCode;
 import parallax.vn.springbootdemo.common.exception.model.ApplicationException;
@@ -59,6 +61,7 @@ public class PlaceOrderService implements PlaceOrderUseCase {
 
     @Override
     @Transactional
+    @RateLimited(key = "orders.place", permits = 30, windowSeconds = 60)
     public Order placeOrder(PlaceOrderCommand command) {
         // 1. idempotency short-circuit
         if (command.idempotencyKey() != null && !command.idempotencyKey().isBlank()) {
@@ -87,29 +90,26 @@ public class PlaceOrderService implements PlaceOrderUseCase {
         Order order = Order.place(orderNumbers.next(), customerId, command.currency(), lines, address,
                 parsePaymentMethod(command.paymentMethod()));
 
-        // 4. persist PENDING, reserve inventory
+        // 4. persist PENDING (stock is only held once risk has spoken)
         order = orders.save(order);
-        inventory.reserve(order.id(), order.lines());
 
         // 5. parallax hop: risk assessment (fail-safe on error inside the adapter)
         OrderRiskSnapshot snapshot = toSnapshot(order, address);
         RiskDecisionSnapshot decision = risk.assess(snapshot);
 
-        // 6. apply verdict; stats only for non-rejected orders (AFTER assessment)
+        // 6. apply verdict; reserve stock line by line + stats only for non-rejected orders
         order.applyRisk(decision);
-        if (order.isRejected()) {
-            inventory.release(order.id());
-        } else {
+        if (!order.isRejected()) {
+            for (OrderLine line : order.lines()) {
+                inventory.reserveLine(order.id(), line);
+            }
             customer.registerPlacedOrder(order.total(), Instant.now());
             customers.save(customer);
         }
         order = orders.save(order);
 
-        // 7. cache decision + remember idempotency key
-        cache.putDecision(order.id(), decision);
-        if (command.idempotencyKey() != null && !command.idempotencyKey().isBlank()) {
-            cache.rememberIdempotencyKey(command.idempotencyKey(), order.id());
-        }
+        // 7. cache decision + remember idempotency key (same-service call)
+        rememberDecision(order, decision, command.idempotencyKey());
 
         // 8. publish event
         events.publish(new OrderPlaced(order.id().value(), customerId.value(), order.status(),
@@ -117,6 +117,19 @@ public class PlaceOrderService implements PlaceOrderUseCase {
         log.info("order placed number={} status={} score={}", order.orderNumber(), order.status(),
                 decision.score());
         return order;
+    }
+
+    /**
+     * Remembers the risk verdict and the idempotency key in its own transaction.
+     * Called from {@link #placeOrder} on {@code this}: the self-invocation bypasses the
+     * Spring proxy, so REQUIRES_NEW is silently ignored and the writes join the outer tx.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void rememberDecision(Order order, RiskDecisionSnapshot decision, String idempotencyKey) {
+        cache.putDecision(order.id(), decision);
+        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+            cache.rememberIdempotencyKey(idempotencyKey, order.id());
+        }
     }
 
     /** Unknown values are client input errors (400), not server failures (500). */

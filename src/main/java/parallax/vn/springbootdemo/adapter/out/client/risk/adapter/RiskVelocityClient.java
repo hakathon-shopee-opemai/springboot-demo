@@ -2,7 +2,9 @@ package parallax.vn.springbootdemo.adapter.out.client.risk.adapter;
 
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.resilience.annotation.Retryable;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 import parallax.vn.springbootdemo.adapter.out.client.risk.dto.request.VelocityAdjustRequest;
 import parallax.vn.springbootdemo.adapter.out.client.risk.dto.response.VelocityAdjustResponse;
 import parallax.vn.springbootdemo.application.order.dto.VelocityAdjustResult;
@@ -20,6 +22,7 @@ public class RiskVelocityClient implements RiskVelocityPort {
     }
 
     @Override
+    @Retryable(includes = RestClientException.class, maxRetries = 2, delay = 200, multiplier = 2)
     public VelocityAdjustResult adjust(UUID customerId, int delta, String operationId) {
         VelocityAdjustResponse res = client.post()
                 .uri("/internal/risk/velocity/adjust")
